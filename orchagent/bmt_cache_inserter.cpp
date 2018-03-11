@@ -185,7 +185,7 @@ void bmt_parse_packet(u_char *args, const struct pcap_pkthdr *header, const u_ch
             uint32_t underlay_dip = ((uint32_t)buf[30]<<24) | ((uint32_t)buf[31]<<16) | ((uint32_t)buf[32]<<8) | ((uint32_t)buf[33]);
             uint32_t overlay_dip = ((uint32_t)buf[80]<<24) | ((uint32_t)buf[81]<<16) | ((uint32_t)buf[82]<<8) | ((uint32_t)buf[83]);
             uint32_t len = ((((uint32_t)buf[16])<<8) | ((uint32_t)buf[17]));
-            SWSS_LOG_NOTICE("[inserter] [recv] packet parsed successfully:     vni= %ul.  overlay  ip=%d.%d.%d.%d. underlay ip=%d.%d.%d.%d",vni, int(buf[80]),int(buf[81]),int(buf[82]),int(buf[83]), int(buf[30]),int(buf[31]),int(buf[32]),int(buf[33]));
+            // SWSS_LOG_NOTICE("[inserter] [recv] packet parsed successfully:     vni= %ul.  overlay  ip=%d.%d.%d.%d. underlay ip=%d.%d.%d.%d",vni, int(buf[80]),int(buf[81]),int(buf[82]),int(buf[83]), int(buf[30]),int(buf[31]),int(buf[32]),int(buf[33]));
             DpdkPacketKey pkt_pair = std::make_pair(vni, overlay_dip);
             DpdkPacketMap::iterator it = pkt_map->find(pkt_pair);
             if (it != pkt_map->end())
@@ -236,7 +236,7 @@ int bmt_init_dpdk_traffic_sampler(){
         SWSS_LOG_ERROR("[inserter] Failed to create samplepacket, rv: %u", status);
         return (6);
     }
-    SWSS_LOG_ERROR("[inserter] Created samplepacket");
+    SWSS_LOG_NOTICE("[inserter] Created samplepacket");
 
 
     /* BIND to ingress dpdk port */
@@ -277,7 +277,7 @@ int bmt_init_dpdk_traffic_sampler(){
     }
 
     hostifOid = port.m_hif_id;
-    SWSS_LOG_ERROR("[inserter] Got hostif");
+    SWSS_LOG_NOTICE("[inserter] Got hostif");
 
     /* create trap group for samplepacket trap */
     vector<sai_attribute_t> hostifTrapGroup_attrs;
@@ -290,7 +290,7 @@ int bmt_init_dpdk_traffic_sampler(){
         SWSS_LOG_ERROR("[inserter] Failed to creat Hostif Trap group, rv:%d", status);
         return (3);
     }
-    SWSS_LOG_ERROR("[inserter] Created hostif trap group");
+    SWSS_LOG_NOTICE("[inserter] Created hostif trap group");
 
 
 	/* create trap for samplepacket action */
@@ -322,7 +322,7 @@ int bmt_init_dpdk_traffic_sampler(){
         SWSS_LOG_ERROR("[inserter] Failed to create samplepacket Hostif Trap, rv: %d", status);
         return (2);
     }
-    SWSS_LOG_ERROR("[inserter] Created hostif samplepacket trap for action_log");
+    SWSS_LOG_NOTICE("[inserter] Created hostif samplepacket trap for action_log");
 
     /* create hostif table entry */
     vector<sai_attribute_t> hostif_table_entry_attrs;
@@ -351,9 +351,9 @@ int bmt_init_dpdk_traffic_sampler(){
         SWSS_LOG_ERROR("[inserter] Failed to create default host interface table, rv: %d", status);
         return (1);
     }
-    SWSS_LOG_ERROR("[inserter] Create default host interface table");
+    SWSS_LOG_NOTICE("[inserter] Create default host interface table");
 
-    SWSS_LOG_ERROR("[inserter] sampler init success.");
+    SWSS_LOG_NOTICE("[inserter] sampler init success.");
     return 0;
 }
 
@@ -367,7 +367,7 @@ int bmt_deinit_dpdk_traffic_sampler(int init_status){
         for(uint32_t i=0; i<vhost_table.used_entries;i++){
 // TODO
             // status = remove_table_vhost_entry(vhost_table.entry[i].entry_id);
-            SWSS_LOG_ERROR("[inserter] deleting cache entries, free entries:");
+            SWSS_LOG_NOTICE("[inserter] deleting cache entries, free entries:");
             if (status != SAI_STATUS_SUCCESS)
                 SWSS_LOG_ERROR("[inserter] Failed at remove_table_vhost_entry %u, status: %u", i, status);
         }
@@ -414,7 +414,7 @@ int bmt_deinit_dpdk_traffic_sampler(int init_status){
             SWSS_LOG_ERROR("[inserter] Failed at samplepacket, rv %u", status);
     }   
 
-    SWSS_LOG_ERROR("[inserter] sampler deinit success.");
+    SWSS_LOG_NOTICE("[inserter] sampler deinit success.");
 
     return 0;
 }
@@ -504,13 +504,10 @@ int bmt_cache_inserter(void)
                 uint64_t bps = 1000000*it_pkt.second.second*PACKETS_PER_SAMPLE/window_time;
                 if (bps > cacheManager.get_insertion_thresh()){
                     SWSS_LOG_NOTICE("[inserter] flow insertion, bytes/sec %lu times in the window",bps);
-                    if(vhost_table.free_offsets.size()<CACHE_EVAC_SIZE && vhost_table.used_entries==(VHOST_TABLE_SIZE-1)){
+                  if (vhost_table.used_entries - vhost_table.free_offsets.size() >= (VHOST_TABLE_SIZE - CACHE_EVAC_SIZE)) { 
                         saistatus = cacheManager.consume_candidate(bps, offset);
                         if (saistatus != SAI_STATUS_SUCCESS) 
                             SWSS_LOG_ERROR("[inserter] ERROR: consume_candidate failed, bytes/sec %lu.",bps);
-                        saistatus = bmt_cache_remove_rule(offset); // TODO move to consume rule
-                        if (saistatus != SAI_STATUS_SUCCESS) 
-                            SWSS_LOG_ERROR("[inserter] ERROR: cant remove rule, offset %d",offset);
                     }
                     saistatus = bmt_cache_insert_vhost_entry(it_pkt.first.second, it_pkt.second.first, it_pkt.first.first);
                     SWSS_LOG_NOTICE("[inserter] [recv]    bmt_cache_insert_vhost_entry. status = %u",saistatus);
@@ -533,8 +530,6 @@ int bmt_cache_inserter(void)
     return(rc);
 
 }
-
-typedef pair<uint64_t,uint32_t>bmt_rule_evac_candidate_t; // bps,offset
 
 
 bmtCacheManager::bmtCacheManager(){
@@ -563,6 +558,10 @@ sai_status_t bmtCacheManager::consume_candidate(uint64_t bps,uint32_t &offset){
         else
         {
             offset = (--it)->second; // removing previous element in list
+            sai_status_t saistatus = bmt_cache_remove_rule(offset); // TODO move to consume rule
+            if (saistatus != SAI_STATUS_SUCCESS) 
+                SWSS_LOG_ERROR("[inserter] ERROR: cant remove rule, offset %d",offset);
+                return saistatus;
             SWSS_LOG_NOTICE("candidate consumption sucess: bps: %lu ,offset: %d", it->first ,offset);
             evac_candidates.erase(it);
             return SAI_STATUS_SUCCESS;
@@ -631,7 +630,6 @@ void counter_read_by_offset(uint32_t offset, uint64_t *counter) {
 
 void bmt_cache_evacuator(){
     SWSS_LOG_ENTER();
-    vector<uint32_t> evac_candidates;
     uint64_t counter_values[EVAC_BATCH_SIZE];
     uint64_t counter_diff[EVAC_BATCH_SIZE];
     bmt_time_t stime[EVAC_BATCH_SIZE];
@@ -659,8 +657,8 @@ void bmt_cache_evacuator(){
             // SWSS_LOG_NOTICE("counter %d (bytes): 0x%lx", i, counter_diff[i-batch_start]);
             // TODO probably more efficiant to sort before iteration:
             if ((vhost_table.entry[i].valid) && (counter_diff[i-batch_start] < cacheManager.get_eviction_thresh())){ 
-                evac_candidates.push_back(i);
-                SWSS_LOG_NOTICE("[evac] INFO: added evac candidate: offset: %d , counter delta: 0x%lx",i,counter_diff[i-batch_start]);
+                cacheManager.insert_candidate(counter_diff[i-batch_start], i); 
+                // SWSS_LOG_NOTICE("[evac] INFO: added evac candidate: offset: %d , counter delta: 0x%lx.",i,counter_diff[i-batch_start]);
             }
         }
         usleep(300000); // prevent busy wait
