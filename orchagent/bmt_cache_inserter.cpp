@@ -668,7 +668,7 @@ void bmt_cache_counters_read() {
                 counter_read_by_offset(i, &g.entryCounters[i]);
             }
         }
-        sleep(1);
+        usleep(100000);
     }
 }
 

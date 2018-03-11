@@ -283,6 +283,7 @@ void BmToRCacheOrch::doVnetIntfTask(Consumer &consumer) {
     vector<string> keys = tokenize(kfvKey(it->second), ':');
     string if_name = keys[0];
     string bm_ip_prefix_str = keys[1];
+    IpPrefix bm_ip_prefix(bm_ip_prefix_str);
     for (auto i : kfvFieldsValues(it->second)) {
             if (fvField(i) == "vnet_name")
                 vnet_name = fvValue(i);
@@ -304,10 +305,36 @@ void BmToRCacheOrch::doVnetIntfTask(Consumer &consumer) {
         add_dpdk_vlan_member(vlan_oid);
         // TODO - check for NULL
         setVnetVlan(vnet_name, vlan_oid);
+ 	sai_object_id_t router_entry_id;	
+	sai_attribute_t vhost_table_entry_attr[6];
+	uint32_t vni = 10; // TODO: get this from VNET (store vnet_name->vni map)
+	uint16_t vnet_bitmap = GetVnetBitmap(vni);
+  	uint32_t offset = GetFreeOffset();
+	if (offset == gVhostTableSize)
+		SWSS_LOG_ERROR("couldn't create router entry, since cache is full");
+	vhost_table_entry_attr[0].id = SAI_TABLE_VHOST_ENTRY_ATTR_ACTION;
+	vhost_table_entry_attr[0].value.s32 = SAI_TABLE_VHOST_ENTRY_ACTION_TO_ROUTER;
+	vhost_table_entry_attr[1].id = SAI_TABLE_VHOST_ENTRY_ATTR_PRIORITY;
+	vhost_table_entry_attr[1].value.u32 = offset; // Todo - manage this in mlnx_sai
+	vhost_table_entry_attr[2].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_KEY;
+	vhost_table_entry_attr[2].value.u16 = vnet_bitmap;
+	vhost_table_entry_attr[3].id = SAI_TABLE_VHOST_ENTRY_ATTR_META_REG_MASK;
+	vhost_table_entry_attr[3].value.u16 = vnet_bitmap;
+	vhost_table_entry_attr[4].id = SAI_TABLE_VHOST_ENTRY_ATTR_DST_IP;
+	vhost_table_entry_attr[4].value.ipaddr.addr.ip4 = bm_ip_prefix.getIp().getIp().ip_addr.ipv4_addr;
+	vhost_table_entry_attr[4].value.ipaddr.addr_family = SAI_IP_ADDR_FAMILY_IPV4;
+	vhost_table_entry_attr[5].id = SAI_TABLE_VHOST_ENTRY_ATTR_VR_ID;
+	vhost_table_entry_attr[5].value.oid = g.virtualRouterId;
+	status = sai_bmtor_api->create_table_vhost_entry(&router_entry_id, gSwitchId, 6, vhost_table_entry_attr);
+	if (status == SAI_STATUS_SUCCESS) {
+	  used_offsets[router_entry_id] = offset;
+	  setVhostEntry(key, router_entry_id);
+	} else {
+	  SWSS_LOG_ERROR("Error creating router entry. status = %d", status);
+	}
     }
     it = consumer.m_toSync.erase(it);
   }
-
 }
 
 void BmToRCacheOrch::doVxlanTunnelTask(Consumer &consumer) {
