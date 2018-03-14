@@ -104,6 +104,7 @@ bmt_vhost_table_t vhost_table;
 bmtCacheManager cacheManager;
 DBConnector *countersDb = 0;
 Table *countersTable = 0;
+std::mutex counter_mutex;
 
 sai_status_t bmt_get_free_offset(uint32_t &offset){
     if (vhost_table.used_entries == (VHOST_TABLE_SIZE-1)){
@@ -608,6 +609,7 @@ void bmt_flush_cache(){
 }
 
 void counter_read_by_offset(uint32_t offset, uint64_t *counter) {
+  lock_guard<mutex> guard(counter_mutex);
   sai_bmtor_stat_t counter_id = SAI_BMTOR_STAT_TABLE_VHOST_HIT_OCTETS;
   *counter = 0;
   if (!vhost_table.entry[offset].valid) 
